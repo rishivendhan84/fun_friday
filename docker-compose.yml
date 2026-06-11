@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: funfriday
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-funfriday_dev}
+      POSTGRES_DB: funfriday
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U funfriday -d funfriday']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://funfriday:${POSTGRES_PASSWORD:-funfriday_dev}@db:5432/funfriday
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      FUN_FRIDAY_TZ: ${FUN_FRIDAY_TZ:-Asia/Kolkata}
+      FUN_FRIDAY_ALWAYS_OPEN: ${FUN_FRIDAY_ALWAYS_OPEN:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "node src/migrate.js && node src/seed.js && node src/server.js"
+    ports:
+      - '4000:4000'
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      API_URL: http://api:4000
+    depends_on:
+      - api
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+
+volumes:
+  pgdata:
