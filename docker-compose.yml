@@ -28,8 +28,10 @@ services:
       db:
         condition: service_healthy
     command: sh -c "node src/migrate.js && node src/seed.js && node src/server.js"
-    ports:
-      - '4000:4000'
+    # The web container reaches the API on the internal network; do not
+    # publish port 4000 publicly. Uncomment only for debugging.
+    # ports:
+    #   - '4000:4000'
     restart: unless-stopped
 
   web:
