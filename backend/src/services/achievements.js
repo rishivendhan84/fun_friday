@@ -10,6 +10,7 @@ const RULES = [
   { code: 'word_wizard', test: (s) => s.gameSlug.startsWith('word-') && s.score >= 300 },
   { code: 'quiz_master', test: (s) => s.gameSlug === 'fastest-finger' && s.score >= 400 },
   { code: 'uno_champion', test: (s) => s.gameSlug === 'uno' && s.won },
+  { code: 'grandmaster', test: (s) => s.gameSlug === 'chess' && s.won },
   { code: 'xp_1000', test: (s) => s.totalXp >= 1000 },
   { code: 'xp_5000', test: (s) => s.totalXp >= 5000 },
   { code: 'early_bird', test: (s) => s.secondsIntoWindow !== null && s.secondsIntoWindow <= 300 },

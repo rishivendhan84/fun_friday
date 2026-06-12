@@ -60,8 +60,7 @@ docker compose ps        # db, api, web should all be "running"
 ```
 
 Open <http://localhost:3000> on the host laptop — you should see the login
-page. Sign in with a demo account (`aisha.khan@differenthair.com` /
-`FunFriday123`) or register.
+page. Register an account (pick your team: Marketing, Development, or Data).
 
 ### 5. Open the firewall for colleagues
 
@@ -125,7 +124,5 @@ volume).
 ## Before the real launch
 
 - Remove `FUN_FRIDAY_ALWAYS_OPEN` from `.env` and `docker compose up -d`.
-- Change or remove the demo users in `backend/src/seed.js` (they all share a
-  published password).
 - This setup is plain HTTP on a trusted office LAN — fine internally. Do not
   port-forward it to the internet; add a reverse proxy + HTTPS first.

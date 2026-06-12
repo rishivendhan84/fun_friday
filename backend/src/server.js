@@ -1,3 +1,4 @@
+import http from 'node:http';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -10,6 +11,7 @@ import gameRoutes from './routes/games.js';
 import leaderboardRoutes from './routes/leaderboard.js';
 import rewardRoutes from './routes/rewards.js';
 import miscRoutes from './routes/misc.js';
+import { initRealtime } from './realtime/index.js';
 
 const app = express();
 
@@ -57,7 +59,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-const server = app.listen(config.port, () => {
+const server = http.createServer(app);
+initRealtime(server);
+server.listen(config.port, () => {
   console.log(`Fun Friday API listening on :${config.port}`);
 });
 

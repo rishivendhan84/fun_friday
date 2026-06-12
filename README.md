@@ -39,8 +39,8 @@ npm install
 npm run dev
 ```
 
-Sign in with a seeded demo account — e.g. `aisha.khan@differenthair.com` /
-`FunFriday123` — or register a new one.
+Register an account on the login page (pick your team: Marketing,
+Development, or Data).
 
 ## Quick start (Docker)
 
@@ -58,12 +58,12 @@ up together at http://localhost:3000.
 | --- | --- | --- |
 | Login / Register | `/` | Email + password, department picker, Fun Friday countdown |
 | Dashboard | `/dashboard` | Level & XP bar, stats, top players, live activity feed |
-| Games Hub | `/games` | Locked outside the Fun Friday window |
-| UNO | `/games/uno` | **Playable** vs 3 bots — full deck, skips, reverses, wilds |
+| Games Hub | `/games` | Locked outside the Fun Friday window; shows who's online |
+| UNO | `/games/uno` | **Multiplayer** — challenge an online colleague (or practice vs 3 bots) |
+| Chess | `/games/chess` | **Multiplayer** — live chess vs a colleague, full rules via chess.js |
 | Fastest Finger | `/games/fastest-finger` | **Playable** timed trivia with speed bonus |
 | Word Battle | `/games/word-battle` | **Playable** 60s typing race with combo multiplier |
 | Word Search | `/games/word-search` | **Playable** drag-to-select 10×10 grid |
-| Chess | `/games/chess` | Tournament bracket (view-only) |
 | Leaderboard | `/leaderboard` | Weekly / Monthly / All-Time, podium, your rank |
 | Achievements | `/achievements` | 10 badges, rarity tiers, auto-unlocked by the server |
 | Rewards | `/rewards` | Spin-the-wheel (once per Fun Friday) + coin shop |
@@ -80,6 +80,13 @@ The frontend proxies `/api/*` to the backend (same-origin), so the JWT lives
 in an httpOnly cookie — no tokens in JavaScript. The API enforces the game
 window, computes XP/coin payouts, unlocks achievements, and runs reward
 redemptions in transactions (stock + balance checked atomically).
+
+Multiplayer (UNO and Chess) runs over Socket.IO at `/api/socket.io`, proxied
+the same way (long-polling transport, so it works through the Next.js
+rewrite). The server is authoritative: it tracks who's online, delivers
+challenge invites, holds the deck/board state, validates every move, and
+pays out XP/coins to both players when a match ends. A player who
+disconnects mid-game has 30 seconds to come back before forfeiting.
 
 ### Backend layout
 

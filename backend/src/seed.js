@@ -1,22 +1,19 @@
-import bcrypt from 'bcryptjs';
 import { pool, withTransaction } from './db.js';
 
 const DEPARTMENTS = [
-  { name: 'Engineering', color: '#8b5cf6' },
-  { name: 'Design', color: '#ec4899' },
   { name: 'Marketing', color: '#f59e0b' },
-  { name: 'Sales', color: '#10b981' },
-  { name: 'HR & Ops', color: '#06b6d4' },
+  { name: 'Development', color: '#8b5cf6' },
+  { name: 'Data', color: '#06b6d4' },
 ];
 
 const GAMES = [
   {
     slug: 'uno',
     name: 'UNO',
-    description: 'Classic card chaos vs 3 bots. Match colors and numbers, save your wilds.',
+    description: 'Card chaos — challenge a colleague head-to-head, or practice vs 3 bots.',
     icon: 'layers',
     playable: true,
-    content: {},
+    content: { multiplayer: true },
   },
   {
     slug: 'fastest-finger',
@@ -77,17 +74,11 @@ const GAMES = [
   },
   {
     slug: 'chess',
-    name: 'Chess Tournament',
-    description: 'Monthly bracket. Watch the matches, climb the ladder.',
+    name: 'Chess',
+    description: 'Challenge a colleague to a live chess match. Checkmate pays the most.',
     icon: 'crown',
-    playable: false,
-    content: {
-      bracket: [
-        { round: 'Semifinal', p1: 'Aisha Khan', p2: 'Marcus Lee', winner: 'Aisha Khan' },
-        { round: 'Semifinal', p1: 'Priya Sharma', p2: 'Tom Becker', winner: 'Priya Sharma' },
-        { round: 'Final', p1: 'Aisha Khan', p2: 'Priya Sharma', winner: null },
-      ],
-    },
+    playable: true,
+    content: { multiplayer: true },
   },
 ];
 
@@ -99,6 +90,7 @@ const ACHIEVEMENTS = [
   { code: 'word_wizard', name: 'Word Wizard', description: 'Score 300+ in a word game', icon: 'wand-2', rarity: 'rare', xp_reward: 125 },
   { code: 'quiz_master', name: 'Quiz Master', description: 'Score 400+ in Fastest Finger', icon: 'brain', rarity: 'epic', xp_reward: 200 },
   { code: 'uno_champion', name: 'UNO Champion', description: 'Win a game of UNO', icon: 'crown', rarity: 'epic', xp_reward: 200 },
+  { code: 'grandmaster', name: 'Grandmaster', description: 'Win a chess match against a colleague', icon: 'trophy', rarity: 'epic', xp_reward: 250 },
   { code: 'xp_1000', name: 'Rising Star', description: 'Reach 1,000 total XP', icon: 'star', rarity: 'rare', xp_reward: 100 },
   { code: 'xp_5000', name: 'Living Legend', description: 'Reach 5,000 total XP', icon: 'sparkles', rarity: 'legendary', xp_reward: 500 },
   { code: 'early_bird', name: 'Early Bird', description: 'Play within the first 5 minutes of Fun Friday', icon: 'alarm-clock', rarity: 'epic', xp_reward: 150 },
@@ -112,17 +104,6 @@ const REWARDS = [
   { name: 'Half-Day Friday', description: 'Leave at 1 PM on a Friday of your choice', icon: 'plane', cost_coins: 1200, stock: 5 },
   { name: 'Desk Upgrade Kit', description: 'Mechanical keyboard or ergonomic mouse', icon: 'keyboard', cost_coins: 2000, stock: 3 },
 ];
-
-const DEMO_USERS = [
-  { email: 'aisha.khan@differenthair.com', name: 'Aisha Khan', dept: 'Engineering', color: '#8b5cf6' },
-  { email: 'marcus.lee@differenthair.com', name: 'Marcus Lee', dept: 'Design', color: '#ec4899' },
-  { email: 'priya.sharma@differenthair.com', name: 'Priya Sharma', dept: 'Engineering', color: '#06b6d4' },
-  { email: 'tom.becker@differenthair.com', name: 'Tom Becker', dept: 'Marketing', color: '#f59e0b' },
-  { email: 'sara.lopez@differenthair.com', name: 'Sara Lopez', dept: 'Sales', color: '#10b981' },
-  { email: 'dev.patel@differenthair.com', name: 'Dev Patel', dept: 'HR & Ops', color: '#ef4444' },
-];
-
-const DEMO_PASSWORD = 'FunFriday123';
 
 async function seed() {
   await withTransaction(async (c) => {
@@ -165,68 +146,12 @@ async function seed() {
       }
     }
 
-    const hash = await bcrypt.hash(DEMO_PASSWORD, 12);
-    const userIds = [];
-    for (const u of DEMO_USERS) {
-      const { rows } = await c.query(
-        `INSERT INTO users (email, password_hash, name, department_id, avatar_color)
-         VALUES ($1, $2, $3, (SELECT id FROM departments WHERE name = $4), $5)
-         ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [u.email, hash, u.name, u.dept, u.color]
-      );
-      userIds.push(rows[0].id);
-    }
-
-    // Demo match history (only if none exists yet) spread over the last 3 weeks
-    const { rows: existingMatches } = await c.query('SELECT COUNT(*)::int AS n FROM matches');
-    if (existingMatches[0].n === 0) {
-      const { rows: games } = await c.query('SELECT id, name FROM games WHERE playable');
-      let rngState = 42;
-      const rng = () => {
-        rngState = (rngState * 1103515245 + 12345) % 2147483648;
-        return rngState / 2147483648;
-      };
-      for (const userId of userIds) {
-        const plays = 4 + Math.floor(rng() * 8);
-        for (let i = 0; i < plays; i++) {
-          const game = games[Math.floor(rng() * games.length)];
-          const score = 50 + Math.floor(rng() * 550);
-          const xp = Math.min(500, 25 + Math.floor(score / 4));
-          const coins = Math.min(200, 10 + Math.floor(score / 10));
-          const daysAgo = Math.floor(rng() * 21);
-          await c.query(
-            `INSERT INTO matches (user_id, game_id, score, xp_earned, coins_earned, duration_seconds, played_at)
-             VALUES ($1, $2, $3, $4, $5, $6, now() - ($7 || ' days')::interval)`,
-            [userId, game.id, score, xp, coins, 60 + Math.floor(rng() * 240), String(daysAgo)]
-          );
-          await c.query('UPDATE users SET xp = xp + $1, coins = coins + $2 WHERE id = $3', [
-            xp,
-            coins,
-            userId,
-          ]);
-        }
-        await c.query(
-          `INSERT INTO activity (user_id, type, message, created_at)
-           VALUES ($1, 'joined', 'joined the arena', now() - interval '21 days')`,
-          [userId]
-        );
-      }
-      // Give demo users their basic achievements
-      await c.query(
-        `INSERT INTO user_achievements (user_id, achievement_id)
-         SELECT m.user_id, a.id FROM achievements a
-         CROSS JOIN (SELECT DISTINCT user_id FROM matches) m
-         WHERE a.code = 'first_blood'
-         ON CONFLICT DO NOTHING`
-      );
-    }
   });
 }
 
 seed()
   .then(() => {
-    console.log(`Seed complete. Demo users use password: ${DEMO_PASSWORD}`);
+    console.log('Seed complete.');
     return pool.end();
   })
   .catch((err) => {
