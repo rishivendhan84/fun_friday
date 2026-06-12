@@ -19,6 +19,9 @@ export const config = {
     'postgres://funfriday:funfriday_dev@localhost:5432/funfriday',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  // Set COOKIE_SECURE=true when serving over HTTPS. Defaults to false so
+  // plain-HTTP deployments (e.g. office LAN) keep working.
+  cookieSecure: process.env.COOKIE_SECURE === 'true',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   funFriday: {
     // IANA timezone the office operates in

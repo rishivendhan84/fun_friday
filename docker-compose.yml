@@ -21,6 +21,7 @@ services:
       PORT: 4000
       DATABASE_URL: postgres://funfriday:${POSTGRES_PASSWORD:-funfriday_dev}@db:5432/funfriday
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       FUN_FRIDAY_TZ: ${FUN_FRIDAY_TZ:-Asia/Kolkata}
       FUN_FRIDAY_ALWAYS_OPEN: ${FUN_FRIDAY_ALWAYS_OPEN:-false}

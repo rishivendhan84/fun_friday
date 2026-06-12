@@ -12,7 +12,7 @@ export function setAuthCookie(res, token) {
   res.cookie('ff_token', token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: config.isProduction,
+    secure: config.cookieSecure,
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
   });
