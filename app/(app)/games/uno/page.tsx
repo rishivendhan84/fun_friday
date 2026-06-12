@@ -1,213 +1,41 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ArrowLeftRight, Ban, Bot, Layers } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Ban, Bot, Flag, Layers, Swords } from "lucide-react";
 import GameGate from "@/components/GameGate";
-import GameResults from "@/components/GameResults";
-import { useScoreSubmit } from "@/lib/useScoreSubmit";
+import OnlinePlayers from "@/components/OnlinePlayers";
+import MultiplayerResults from "@/components/MultiplayerResults";
+import UnoBotGame from "@/components/UnoBotGame";
+import Avatar from "@/components/Avatar";
+import { useRealtime } from "@/lib/realtime";
+import { useUser } from "@/components/UserProvider";
+import type { MultiplayerContent, UnoCard, UnoColor, UnoState } from "@/lib/types";
 
-/* ---------------- UNO engine (pure) ---------------- */
+/* ---------------- Card rendering (server card codes) ---------------- */
 
-type UnoColor = "red" | "green" | "blue" | "yellow";
-type UnoValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "skip" | "reverse" | "+2" | "wild" | "+4";
-
-interface Card {
-  id: number;
-  color: UnoColor | null; // null = wild
-  value: UnoValue;
-}
-
-interface GState {
-  hands: Card[][]; // index 0 = human, 1-3 = bots
-  drawPile: Card[];
-  discard: Card[]; // last element is the top
-  activeColor: UnoColor;
-  turn: number;
-  direction: 1 | -1;
-  winner: number | null;
-  message: string;
-}
-
-const COLORS: UnoColor[] = ["red", "green", "blue", "yellow"];
-const COLOR_HEX: Record<UnoColor, string> = {
-  red: "#ef4444",
-  green: "#22c55e",
-  blue: "#3b82f6",
-  yellow: "#eab308",
+const UNO_HEX: Record<UnoColor, string> = {
+  R: "#ef4444",
+  G: "#22c55e",
+  B: "#3b82f6",
+  Y: "#eab308",
 };
-const BOT_NAMES = ["Bot Riya", "Bot Max", "Bot Zed"];
+const UNO_COLOR_NAME: Record<UnoColor, string> = { R: "red", G: "green", B: "blue", Y: "yellow" };
+const WILD_COLORS: UnoColor[] = ["R", "G", "B", "Y"];
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function buildDeck(): Card[] {
-  const cards: Card[] = [];
-  let id = 0;
-  for (const color of COLORS) {
-    cards.push({ id: id++, color, value: "0" });
-    for (let n = 1; n <= 9; n++) {
-      const v = String(n) as UnoValue;
-      cards.push({ id: id++, color, value: v }, { id: id++, color, value: v });
-    }
-    for (const v of ["skip", "reverse", "+2"] as UnoValue[]) {
-      cards.push({ id: id++, color, value: v }, { id: id++, color, value: v });
-    }
-  }
-  for (let i = 0; i < 4; i++) cards.push({ id: id++, color: null, value: "wild" });
-  for (let i = 0; i < 4; i++) cards.push({ id: id++, color: null, value: "+4" });
-  return shuffle(cards); // 108 cards
-}
-
-function newGame(): GState {
-  const deck = buildDeck();
-  const hands: Card[][] = [[], [], [], []];
-  for (let i = 0; i < 7; i++) for (let p = 0; p < 4; p++) hands[p].push(deck.pop()!);
-  // flip until a number card so the game starts clean
-  let top = deck.pop()!;
-  const buried: Card[] = [];
-  while (top.color === null || !/^\d$/.test(top.value)) {
-    buried.push(top);
-    top = deck.pop()!;
-  }
-  deck.unshift(...buried);
-  return {
-    hands,
-    drawPile: deck,
-    discard: [top],
-    activeColor: top.color!,
-    turn: 0,
-    direction: 1,
-    winner: null,
-    message: "Your turn — match the color or value.",
-  };
-}
-
-function canPlay(card: Card, top: Card, activeColor: UnoColor): boolean {
-  if (card.color === null) return true;
-  return card.color === activeColor || card.value === top.value;
-}
-
-function clone(s: GState): GState {
-  return {
-    ...s,
-    hands: s.hands.map((h) => [...h]),
-    drawPile: [...s.drawPile],
-    discard: [...s.discard],
-  };
-}
-
-/** Draw n cards into player's hand, reshuffling the discard if needed. */
-function draw(s: GState, player: number, n: number) {
-  for (let i = 0; i < n; i++) {
-    if (s.drawPile.length === 0) {
-      if (s.discard.length <= 1) return;
-      const top = s.discard.pop()!;
-      s.drawPile = shuffle(s.discard);
-      s.discard = [top];
-    }
-    s.hands[player].push(s.drawPile.pop()!);
-  }
-}
-
-function nextOf(s: GState, from: number, steps = 1): number {
-  return (from + s.direction * steps + 8) % 4;
-}
-
-function playerName(p: number): string {
-  return p === 0 ? "You" : BOT_NAMES[p - 1];
-}
-
-/** Play hand[cardIdx] of `player`. Assumes the move is legal. */
-function applyPlay(prev: GState, player: number, cardIdx: number, chosenColor?: UnoColor): GState {
-  const s = clone(prev);
-  const card = s.hands[player].splice(cardIdx, 1)[0];
-  s.discard.push(card);
-  s.activeColor = card.color ?? chosenColor ?? "red";
-
-  if (s.hands[player].length === 0) {
-    s.winner = player;
-    s.message = player === 0 ? "You emptied your hand!" : `${playerName(player)} wins this round.`;
-    return s;
-  }
-
-  let skipNext = false;
-  let msg = `${playerName(player)} played ${card.color ?? s.activeColor} ${card.value}.`;
-  if (card.value === "reverse") {
-    s.direction = s.direction === 1 ? -1 : 1;
-    msg = `${playerName(player)} reversed the direction.`;
-  } else if (card.value === "skip") {
-    skipNext = true;
-    msg = `${playerName(player)} skipped ${playerName(nextOf(s, player))}.`;
-  } else if (card.value === "+2") {
-    const victim = nextOf(s, player);
-    draw(s, victim, 2);
-    skipNext = true;
-    msg = `${playerName(victim)} draws 2 and is skipped.`;
-  } else if (card.value === "+4") {
-    const victim = nextOf(s, player);
-    draw(s, victim, 4);
-    skipNext = true;
-    msg = `${playerName(player)} chose ${s.activeColor}. ${playerName(victim)} draws 4.`;
-  } else if (card.value === "wild") {
-    msg = `${playerName(player)} chose ${s.activeColor}.`;
-  }
-
-  s.turn = nextOf(s, player, skipNext ? 2 : 1);
-  s.message = s.turn === 0 ? `${msg} Your turn.` : msg;
-  return s;
-}
-
-/** Player draws one card; auto-plays it if possible (bots and human non-wild). */
-function applyDraw(prev: GState, player: number, autoPlayWilds: boolean, pickColor: (h: Card[]) => UnoColor): GState | { needsWild: GState } {
-  const s = clone(prev);
-  draw(s, player, 1);
-  const hand = s.hands[player];
-  const drawn = hand[hand.length - 1];
-  const top = s.discard[s.discard.length - 1];
-  if (drawn && canPlay(drawn, top, s.activeColor)) {
-    if (drawn.color === null && !autoPlayWilds) {
-      s.message = "You drew a wild — pick a color.";
-      return { needsWild: s };
-    }
-    return applyPlay(s, player, hand.length - 1, drawn.color === null ? pickColor(hand) : undefined);
-  }
-  s.turn = nextOf(s, player);
-  s.message = `${playerName(player)} drew a card and passed.${s.turn === 0 ? " Your turn." : ""}`;
-  return s;
-}
-
-function bestColor(hand: Card[]): UnoColor {
-  const counts: Record<UnoColor, number> = { red: 0, green: 0, blue: 0, yellow: 0 };
-  for (const c of hand) if (c.color) counts[c.color]++;
-  return COLORS.reduce((best, c) => (counts[c] > counts[best] ? c : best), "red" as UnoColor);
-}
-
-function botMove(prev: GState): GState {
-  const p = prev.turn;
-  const top = prev.discard[prev.discard.length - 1];
-  const idx = prev.hands[p].findIndex((c) => canPlay(c, top, prev.activeColor));
-  if (idx >= 0) {
-    const card = prev.hands[p][idx];
-    return applyPlay(prev, p, idx, card.color === null ? bestColor(prev.hands[p]) : undefined);
-  }
-  const r = applyDraw(prev, p, true, bestColor);
-  return "needsWild" in r ? r.needsWild : r;
-}
-
-/* ---------------- UI ---------------- */
-
-function CardFace({ card, activeColor }: { card: Card; activeColor?: UnoColor }) {
-  const hex = card.color ? COLOR_HEX[card.color] : undefined;
+function MpCardFace({ card, currentColor }: { card: UnoCard; currentColor?: UnoColor }) {
+  const hex = card.color !== "W" ? UNO_HEX[card.color] : undefined;
   const label =
-    card.value === "skip" ? <Ban size={20} /> : card.value === "reverse" ? <ArrowLeftRight size={20} /> : card.value === "wild" ? "W" : card.value;
+    card.value === "skip" ? (
+      <Ban size={20} />
+    ) : card.value === "rev" ? (
+      <ArrowLeftRight size={20} />
+    ) : card.value === "wild" ? (
+      "W"
+    ) : (
+      card.value
+    );
   return (
     <div
       className="relative flex h-24 w-16 select-none flex-col items-center justify-center rounded-xl border-2 border-white/25 text-xl font-black text-white shadow-lg sm:h-28 sm:w-[4.5rem]"
@@ -222,17 +50,17 @@ function CardFace({ card, activeColor }: { card: Card; activeColor?: UnoColor })
     >
       <span className="absolute left-1.5 top-1 text-[10px] opacity-80">{typeof label === "string" ? label : null}</span>
       <span className="drop-shadow">{label}</span>
-      {card.color === null && activeColor && (
+      {card.color === "W" && currentColor && (
         <span
           className="absolute -bottom-1.5 h-3 w-3 rounded-full border border-white"
-          style={{ backgroundColor: COLOR_HEX[activeColor] }}
+          style={{ backgroundColor: UNO_HEX[currentColor] }}
         />
       )}
     </div>
   );
 }
 
-function CardBack({ small }: { small?: boolean }) {
+function MpCardBack({ small }: { small?: boolean }) {
   return (
     <div
       className={`flex items-center justify-center rounded-lg border border-white/15 bg-gradient-to-br from-violet-800 to-fuchsia-900 font-black text-white/70 shadow ${
@@ -244,193 +72,185 @@ function CardBack({ small }: { small?: boolean }) {
   );
 }
 
-function UnoGame() {
-  const { result, error, submitting, submit, reset } = useScoreSubmit("uno");
-  const [state, setState] = useState<GState>(() => newGame());
-  const [pendingWildIdx, setPendingWildIdx] = useState<number | null>(null);
-  const startedAtRef = useRef(Date.now());
-  const submittedWinRef = useRef(false);
+/* ---------------- Multiplayer table ---------------- */
 
-  // Bot turns
-  useEffect(() => {
-    if (state.winner !== null || state.turn === 0) return;
-    const t = setTimeout(() => setState((s) => (s.winner === null && s.turn !== 0 ? botMove(s) : s)), 850);
-    return () => clearTimeout(t);
-  }, [state]);
+function isPlayable(card: UnoCard, state: UnoState): boolean {
+  return card.color === "W" || card.color === state.currentColor || card.value === state.currentValue;
+}
 
-  // Submit once on game end
-  useEffect(() => {
-    if (state.winner === null || submittedWinRef.current) return;
-    submittedWinRef.current = true;
-    const won = state.winner === 0;
-    const botCardsLeft = state.hands.slice(1).reduce((sum, h) => sum + h.length, 0);
-    const score = won ? 200 + 10 * botCardsLeft : 50;
-    void submit(score, Math.round((Date.now() - startedAtRef.current) / 1000), { won });
-  }, [state, submit]);
+function UnoLive({ state }: { state: UnoState }) {
+  const { user } = useUser();
+  const { unoPlay, unoDraw, unoPass, leaveGame } = useRealtime();
+  const [wildCardId, setWildCardId] = useState<number | null>(null);
+  const [confirmForfeit, setConfirmForfeit] = useState(false);
 
-  const playAgain = useCallback(() => {
-    reset();
-    submittedWinRef.current = false;
-    startedAtRef.current = Date.now();
-    setPendingWildIdx(null);
-    setState(newGame());
-  }, [reset]);
+  const opponent = state.players.find((p) => p.id !== user?.id);
+  const myTurn = state.turnUserId === user?.id && state.winnerId === null;
+  const oppTurn = opponent !== undefined && state.turnUserId === opponent.id && state.winnerId === null;
 
-  const top = state.discard[state.discard.length - 1];
-  const myTurn = state.turn === 0 && state.winner === null;
-  const myHand = state.hands[0];
-
-  function clickCard(idx: number) {
-    if (!myTurn) return;
-    const card = myHand[idx];
-    if (!canPlay(card, top, state.activeColor)) return;
-    if (card.color === null) {
-      setPendingWildIdx(idx);
+  function clickCard(card: UnoCard) {
+    if (!myTurn || !isPlayable(card, state)) return;
+    if (card.color === "W") {
+      setWildCardId(card.id);
       return;
     }
-    setState((s) => applyPlay(s, 0, idx));
+    unoPlay(card.id);
   }
 
   function chooseWildColor(color: UnoColor) {
-    if (pendingWildIdx === null) return;
-    const idx = pendingWildIdx;
-    setPendingWildIdx(null);
-    setState((s) => {
-      // drawn-wild flow stores the wild as the last card; played-wild flow uses the clicked index
-      if (idx === -1) return applyPlay(s, 0, s.hands[0].length - 1, color);
-      return applyPlay(s, 0, idx, color);
-    });
-  }
-
-  function clickDraw() {
-    if (!myTurn) return;
-    setState((s) => {
-      const r = applyDraw(s, 0, false, bestColor);
-      if ("needsWild" in r) {
-        setPendingWildIdx(-1);
-        return r.needsWild;
-      }
-      return r;
-    });
-  }
-
-  if (state.winner !== null) {
-    const won = state.winner === 0;
-    const botCardsLeft = state.hands.slice(1).reduce((sum, h) => sum + h.length, 0);
-    return (
-      <GameResults
-        title={won ? "UNO! You win!" : `${playerName(state.winner)} wins`}
-        score={won ? 200 + 10 * botCardsLeft : 50}
-        stats={[
-          ["Result", won ? "Victory" : "Defeat"],
-          ["Bot cards left", String(botCardsLeft)],
-        ]}
-        result={result}
-        error={error}
-        submitting={submitting}
-        onPlayAgain={playAgain}
-      />
-    );
+    if (wildCardId === null) return;
+    unoPlay(wildCardId, color);
+    setWildCardId(null);
   }
 
   return (
-    <div className="mx-auto mt-4 max-w-4xl">
-      {/* Bots */}
-      <div className="grid grid-cols-3 gap-3">
-        {BOT_NAMES.map((name, i) => {
-          const p = i + 1;
-          const isTurn = state.turn === p;
-          const count = state.hands[p].length;
-          return (
-            <div
-              key={name}
-              className={`glass rounded-2xl p-3 text-center transition ${isTurn ? "border-cyan-400/60 shadow-lg shadow-cyan-500/10" : ""}`}
-            >
-              <p className={`mb-2 flex items-center justify-center gap-1.5 text-xs font-bold ${isTurn ? "text-cyan-300" : "text-zinc-400"}`}>
-                <Bot size={14} /> {name}
-                {isTurn && <span className="animate-pulse">●</span>}
-              </p>
-              <div className="flex items-center justify-center -space-x-4">
-                {Array.from({ length: Math.min(count, 5) }).map((_, k) => (
-                  <CardBack key={k} small />
-                ))}
-              </div>
-              <p className={`mt-2 text-xs font-bold ${count === 1 ? "text-red-400" : "text-zinc-400"}`}>
-                {count} card{count !== 1 ? "s" : ""}
-                {count === 1 ? " — UNO!" : ""}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+    <div className="mx-auto mt-4 max-w-3xl">
+      {/* Opponent */}
+      {opponent && (
+        <div
+          className={`glass mx-auto max-w-sm rounded-2xl p-4 text-center transition ${
+            oppTurn ? "border-cyan-400/60 shadow-lg shadow-cyan-500/10" : ""
+          }`}
+        >
+          <div className="mb-2 flex items-center justify-center gap-2">
+            <Avatar name={opponent.name} color={opponent.avatarColor} size={30} />
+            <p className={`text-sm font-bold ${oppTurn ? "text-cyan-300" : "text-zinc-300"}`}>
+              {opponent.name}
+              {oppTurn && <span className="ml-1.5 animate-pulse">●</span>}
+            </p>
+          </div>
+          <div className="flex items-center justify-center -space-x-4">
+            {Array.from({ length: Math.min(opponent.cards, 7) }).map((_, k) => (
+              <MpCardBack key={k} small />
+            ))}
+          </div>
+          <p className={`mt-2 text-xs font-bold ${opponent.cards === 1 ? "text-red-400" : "text-zinc-400"}`}>
+            {opponent.cards} card{opponent.cards !== 1 ? "s" : ""}
+            {opponent.cards === 1 ? " — UNO!" : ""}
+          </p>
+        </div>
+      )}
 
       {/* Table center */}
       <div className="glass my-4 flex items-center justify-center gap-6 rounded-2xl p-5 sm:gap-10">
         <button
-          onClick={clickDraw}
-          disabled={!myTurn}
-          className={`group relative transition ${myTurn ? "hover:-translate-y-1" : "opacity-60"}`}
+          onClick={() => myTurn && !state.mayPass && unoDraw()}
+          disabled={!myTurn || state.mayPass}
+          className={`group relative transition ${myTurn && !state.mayPass ? "hover:-translate-y-1" : "opacity-60"}`}
           aria-label="Draw a card"
         >
-          <CardBack />
+          <MpCardBack />
           <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-bold uppercase tracking-wider text-zinc-500 group-hover:text-cyan-300">
-            Draw ({state.drawPile.length})
+            Draw ({state.deckCount})
           </span>
         </button>
 
         <AnimatePresence mode="popLayout">
           <motion.div
-            key={top.id}
+            key={state.discardTop.id}
             initial={{ scale: 0.6, rotate: -12, opacity: 0 }}
             animate={{ scale: 1, rotate: 0, opacity: 1 }}
             transition={{ type: "spring", damping: 18 }}
           >
-            <CardFace card={top} activeColor={state.activeColor} />
+            <MpCardFace card={state.discardTop} currentColor={state.currentColor} />
           </motion.div>
         </AnimatePresence>
 
         <div className="flex flex-col items-center gap-2 text-center">
           <span
-            className="h-6 w-6 rounded-full border-2 border-white/40"
-            style={{ backgroundColor: COLOR_HEX[state.activeColor], boxShadow: `0 0 12px ${COLOR_HEX[state.activeColor]}` }}
+            className="h-7 w-7 rounded-full border-2 border-white/40"
+            style={{
+              backgroundColor: UNO_HEX[state.currentColor],
+              boxShadow: `0 0 14px ${UNO_HEX[state.currentColor]}`,
+            }}
           />
           <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-            {state.activeColor}
-            <span className="mx-1">·</span>
-            {state.direction === 1 ? "→" : "←"}
+            {UNO_COLOR_NAME[state.currentColor]}
           </p>
         </div>
       </div>
 
-      <p className="mb-3 min-h-5 text-center text-sm text-zinc-300">{state.message}</p>
+      {/* Status + actions */}
+      <div className="mb-3 flex min-h-9 flex-wrap items-center justify-center gap-3 text-sm text-zinc-300">
+        {myTurn ? (
+          state.mayPass ? (
+            <span className="font-semibold text-violet-300">You drew a playable card — play it or pass.</span>
+          ) : (
+            <span className="font-semibold text-cyan-300">Your turn — play a card or draw.</span>
+          )
+        ) : (
+          <span>Waiting for {opponent?.name ?? "opponent"}…</span>
+        )}
+        {state.mayPass && (
+          <button
+            onClick={unoPass}
+            className="rounded-lg bg-violet-500/20 px-4 py-1.5 text-xs font-bold text-violet-300 transition hover:bg-violet-500/30"
+          >
+            Pass
+          </button>
+        )}
+      </div>
 
       {/* Your hand */}
       <div className={`glass rounded-2xl p-4 ${myTurn ? "border-violet-500/40" : ""}`}>
         <p className="mb-3 text-center text-xs font-bold uppercase tracking-wider text-zinc-400">
-          Your hand ({myHand.length}){myHand.length === 1 ? " — UNO!" : ""}
+          Your hand ({state.yourHand.length}){state.yourHand.length === 1 ? " — UNO!" : ""}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
-          {myHand.map((card, idx) => {
-            const playable = myTurn && canPlay(card, top, state.activeColor);
+          {state.yourHand.map((card) => {
+            const playable = myTurn && isPlayable(card, state);
             return (
               <motion.button
                 key={card.id}
                 layout
-                onClick={() => clickCard(idx)}
+                onClick={() => clickCard(card)}
                 disabled={!playable}
                 whileHover={playable ? { y: -10, scale: 1.05 } : undefined}
-                className={`transition ${playable ? "cursor-pointer drop-shadow-[0_0_10px_rgba(167,139,250,0.6)]" : "opacity-50 saturate-50"}`}
+                className={`transition ${
+                  playable ? "cursor-pointer drop-shadow-[0_0_10px_rgba(167,139,250,0.6)]" : "opacity-50 saturate-50"
+                }`}
               >
-                <CardFace card={card} />
+                <MpCardFace card={card} />
               </motion.button>
             );
           })}
         </div>
       </div>
 
+      {/* Forfeit */}
+      <div className="mt-4 flex justify-center">
+        {confirmForfeit ? (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-zinc-400">Forfeit the match?</span>
+            <button
+              onClick={() => {
+                leaveGame();
+                setConfirmForfeit(false);
+              }}
+              className="rounded-lg bg-red-500/20 px-3 py-2 font-bold text-red-400 transition hover:bg-red-500/30"
+            >
+              Yes, forfeit
+            </button>
+            <button
+              onClick={() => setConfirmForfeit(false)}
+              className="rounded-lg border border-white/10 px-3 py-2 font-semibold text-zinc-300 hover:text-white"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmForfeit(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-400 transition hover:border-red-500/40 hover:text-red-400"
+          >
+            <Flag size={13} /> Forfeit
+          </button>
+        )}
+      </div>
+
       {/* Wild color picker */}
       <AnimatePresence>
-        {pendingWildIdx !== null && (
+        {wildCardId !== null && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -446,25 +266,20 @@ function UnoGame() {
               <Layers size={26} className="mx-auto mb-2 text-violet-300" />
               <h3 className="mb-4 text-lg font-bold text-white">Pick a color</h3>
               <div className="grid grid-cols-2 gap-3">
-                {COLORS.map((c) => (
+                {WILD_COLORS.map((c) => (
                   <button
                     key={c}
                     onClick={() => chooseWildColor(c)}
                     className="rounded-xl py-4 text-sm font-black uppercase tracking-wider text-white transition hover:scale-105"
-                    style={{ backgroundColor: COLOR_HEX[c], boxShadow: `0 4px 14px ${COLOR_HEX[c]}66` }}
+                    style={{ backgroundColor: UNO_HEX[c], boxShadow: `0 4px 14px ${UNO_HEX[c]}66` }}
                   >
-                    {c}
+                    {UNO_COLOR_NAME[c]}
                   </button>
                 ))}
               </div>
-              {pendingWildIdx !== -1 && (
-                <button
-                  onClick={() => setPendingWildIdx(null)}
-                  className="mt-4 text-xs text-zinc-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-              )}
+              <button onClick={() => setWildCardId(null)} className="mt-4 text-xs text-zinc-400 hover:text-white">
+                Cancel
+              </button>
             </motion.div>
           </motion.div>
         )}
@@ -473,13 +288,134 @@ function UnoGame() {
   );
 }
 
+/* ---------------- Mode chooser + page ---------------- */
+
+type Mode = "choose" | "multi" | "bots";
+
+function ModeChooser({ onPick }: { onPick: (mode: Exclude<Mode, "choose">) => void }) {
+  const cards = [
+    {
+      mode: "multi" as const,
+      icon: Swords,
+      accent: "#e879f9",
+      title: "Challenge a colleague",
+      description: "Head-to-head UNO against someone online right now. Winner takes the XP.",
+    },
+    {
+      mode: "bots" as const,
+      icon: Bot,
+      accent: "#22d3ee",
+      title: "Practice vs bots",
+      description: "The classic 4-player table against three bots. Scores count as usual.",
+    },
+  ];
+
+  return (
+    <div className="mx-auto mt-6 max-w-2xl">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6 text-center">
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-fuchsia-500/15 text-fuchsia-300">
+          <Layers size={26} />
+        </div>
+        <h1 className="text-2xl font-black text-white">UNO Showdown</h1>
+        <p className="mt-1 text-sm text-zinc-400">Pick your table.</p>
+      </motion.div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {cards.map(({ mode, icon: CardIcon, accent, title, description }, i) => (
+          <motion.button
+            key={mode}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.08 }}
+            onClick={() => onPick(mode)}
+            className="glass glass-hover relative overflow-hidden rounded-2xl p-6 text-left"
+          >
+            <div
+              className="absolute -right-10 -top-10 h-32 w-32 rounded-full blur-3xl"
+              style={{ backgroundColor: `${accent}26` }}
+            />
+            <span
+              className="relative flex h-12 w-12 items-center justify-center rounded-xl"
+              style={{ backgroundColor: `${accent}22`, color: accent }}
+            >
+              <CardIcon size={24} />
+            </span>
+            <h3 className="relative mt-4 text-lg font-bold text-white">{title}</h3>
+            <p className="relative mt-1 text-sm text-zinc-400">{description}</p>
+          </motion.button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function UnoPage() {
+  const { currentGame, lastGameOver, clearLastGameOver } = useRealtime();
+  const [mode, setMode] = useState<Mode>("choose");
+
+  if (currentGame && currentGame.game === "uno") {
+    return (
+      <div>
+        <Link href="/games" className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white">
+          <ArrowLeft size={15} /> Back to games
+        </Link>
+        <UnoLive state={currentGame.state} />
+      </div>
+    );
+  }
+
+  if (lastGameOver && lastGameOver.state.game === "uno") {
+    return (
+      <MultiplayerResults
+        payload={lastGameOver}
+        onPlayAgain={() => {
+          clearLastGameOver();
+          setMode("multi");
+        }}
+        onLeave={clearLastGameOver}
+      />
+    );
+  }
+
+  if (mode === "choose") {
+    return (
+      <div>
+        <Link href="/games" className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white">
+          <ArrowLeft size={15} /> Back to games
+        </Link>
+        <ModeChooser onPick={setMode} />
+      </div>
+    );
+  }
+
   return (
     <div>
-      <Link href="/games" className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white">
-        <ArrowLeft size={15} /> Back to games
-      </Link>
-      <GameGate<Record<string, never>> slug="uno">{() => <UnoGame />}</GameGate>
+      <button
+        onClick={() => setMode("choose")}
+        className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white"
+      >
+        <ArrowLeft size={15} /> Change mode
+      </button>
+      <GameGate<MultiplayerContent> slug="uno">
+        {() =>
+          mode === "bots" ? (
+            <UnoBotGame />
+          ) : (
+            <div className="mx-auto mt-6 max-w-2xl">
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6 text-center">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-fuchsia-500/15 text-fuchsia-300">
+                  <Swords size={26} />
+                </div>
+                <h1 className="text-2xl font-black text-white">Challenge a colleague</h1>
+                <p className="mt-1 text-sm text-zinc-400">
+                  Pick an opponent below — the match starts as soon as they accept.
+                </p>
+              </motion.div>
+              <OnlinePlayers games={["uno"]} />
+            </div>
+          )
+        }
+      </GameGate>
     </div>
   );
 }

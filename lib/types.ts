@@ -57,15 +57,9 @@ export interface WordSearchContent {
   wordSets: string[][];
 }
 
-export interface BracketMatch {
-  round: string;
-  p1: string;
-  p2: string;
-  winner: string | null;
-}
-
-export interface ChessContent {
-  bracket: BracketMatch[];
+/** Content payload for the multiplayer games (uno, chess). */
+export interface MultiplayerContent {
+  multiplayer: boolean;
 }
 
 export interface GameDetail<C> {
@@ -213,4 +207,119 @@ export interface ProfileResponse {
   perGame: PerGameStat[];
   history: MatchHistoryItem[];
   achievements: { name: string; icon: string; rarity: Rarity; unlocked_at: string }[];
+}
+
+/* ---------------- Realtime / multiplayer protocol ---------------- */
+
+export type MultiplayerGame = "uno" | "chess";
+
+export interface OnlineUser {
+  id: number;
+  name: string;
+  avatarColor: string;
+  department: string | null;
+  inGame: boolean;
+}
+
+export interface InvitePlayer {
+  id: number;
+  name: string;
+  avatarColor: string;
+}
+
+export interface IncomingInvite {
+  inviteId: string;
+  game: MultiplayerGame;
+  from: InvitePlayer;
+}
+
+export interface InviteResult {
+  inviteId: string;
+  accepted: false;
+  reason: "declined" | "expired";
+  by: InvitePlayer;
+}
+
+/* UNO */
+
+export type UnoColor = "R" | "G" | "B" | "Y";
+export type UnoCardColor = UnoColor | "W";
+export type UnoCardValue =
+  | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+  | "skip" | "rev" | "+2" | "wild" | "+4";
+
+export interface UnoCard {
+  id: number;
+  color: UnoCardColor;
+  value: UnoCardValue;
+}
+
+export interface UnoPlayer {
+  id: number;
+  name: string;
+  avatarColor: string;
+  cards: number;
+}
+
+export interface UnoState {
+  game: "uno";
+  players: UnoPlayer[];
+  yourHand: UnoCard[];
+  discardTop: UnoCard;
+  currentColor: UnoColor;
+  currentValue: UnoCardValue;
+  turnUserId: number;
+  mayPass: boolean;
+  deckCount: number;
+  winnerId: number | null;
+}
+
+/* Chess */
+
+export type ChessSide = "w" | "b";
+export type ChessPromotion = "q" | "r" | "b" | "n";
+export type ChessResult = "checkmate" | "draw" | "resign" | "forfeit";
+
+export interface ChessPlayer {
+  id: number;
+  name: string;
+  avatarColor: string;
+  color: ChessSide;
+}
+
+export interface ChessState {
+  game: "chess";
+  players: ChessPlayer[];
+  fen: string;
+  turn: ChessSide;
+  yourColor: ChessSide;
+  lastMove: { from: string; to: string; san: string } | null;
+  check: boolean;
+  history: string[];
+  winnerId: number | null;
+  result: ChessResult | null;
+}
+
+export type GameState = UnoState | ChessState;
+
+export type CurrentGame =
+  | { roomId: string; game: "uno"; state: UnoState }
+  | { roomId: string; game: "chess"; state: ChessState };
+
+export interface MultiplayerRewards {
+  xpEarned: number;
+  coinsEarned: number;
+  totals: { xp: number; coins: number };
+  achievementsUnlocked: AchievementUnlocked[];
+}
+
+export type GameOverReason = "won" | "checkmate" | "draw" | "resign" | "forfeit";
+
+export interface GameOverPayload {
+  roomId: string;
+  winnerId: number | null;
+  draw: boolean;
+  reason: GameOverReason;
+  state: GameState;
+  rewards: MultiplayerRewards | null;
 }

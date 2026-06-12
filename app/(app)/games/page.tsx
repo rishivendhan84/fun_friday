@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Eye, Loader2, Lock, Play, Radio } from "lucide-react";
+import { Loader2, Lock, Play, Radio, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import type { FunFridayStatus, GameSummary } from "@/lib/types";
 import Icon from "@/components/Icon";
 import CountdownTimer from "@/components/CountdownTimer";
+import OnlinePlayers from "@/components/OnlinePlayers";
+
+const MULTIPLAYER_SLUGS = new Set(["uno", "chess"]);
 
 const ACCENTS = ["#8b5cf6", "#22d3ee", "#e879f9", "#34d399", "#f59e0b"];
 
@@ -60,11 +63,12 @@ export default function GamesPage() {
         </div>
       </motion.div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-start">
+        <div className="grid gap-4 sm:grid-cols-2">
         {games.map((g, i) => {
           const accent = ACCENTS[i % ACCENTS.length];
-          const isChess = g.slug === "chess";
-          const clickable = isChess || open;
+          const isMultiplayer = MULTIPLAYER_SLUGS.has(g.slug);
+          const clickable = open;
           const href = `/games/${g.slug}`;
 
           const card = (
@@ -87,15 +91,18 @@ export default function GamesPage() {
                 >
                   <Icon name={g.icon} size={24} />
                 </span>
-                {isChess ? (
-                  <span className="flex items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-300">
-                    <Eye size={11} /> View only
-                  </span>
-                ) : open ? (
-                  <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-green-400">
-                    <Play size={11} /> Playable
-                  </span>
-                ) : null}
+                <span className="flex items-center gap-1.5">
+                  {isMultiplayer && (
+                    <span className="flex items-center gap-1 rounded-full bg-fuchsia-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">
+                      <Users size={11} /> Multiplayer
+                    </span>
+                  )}
+                  {open && (
+                    <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-green-400">
+                      <Play size={11} /> Playable
+                    </span>
+                  )}
+                </span>
               </div>
               <h3 className="relative mt-4 text-lg font-bold text-white">{g.name}</h3>
               <p className="relative mt-1 flex-1 text-sm text-zinc-400">{g.description}</p>
@@ -129,6 +136,9 @@ export default function GamesPage() {
             </div>
           );
         })}
+        </div>
+
+        <OnlinePlayers games={["uno", "chess"]} />
       </div>
     </div>
   );
