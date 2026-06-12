@@ -39,6 +39,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        API_URL: http://api:4000
     environment:
       API_URL: http://api:4000
     depends_on:
