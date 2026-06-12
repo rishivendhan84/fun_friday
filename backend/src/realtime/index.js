@@ -125,6 +125,9 @@ const publicPlayer = (user) => ({
 export function initRealtime(httpServer) {
   io = new Server(httpServer, {
     path: '/api/socket.io',
+    // Next.js 308-redirects trailing-slash paths, which breaks the
+    // polling handshake when proxied — so don't use one.
+    addTrailingSlash: false,
     transports: ['polling', 'websocket'],
     pingInterval: 10_000,
     pingTimeout: 20_000,
